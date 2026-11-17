@@ -1,0 +1,1101 @@
+<!DOCTYPE html>
+<html lang="vi">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>AutoSign AI — Ký PDF Tự Động Với Gemini Pro</title>
+  <script src="https://cdn.tailwindcss.com/3.4.17"></script>
+  <link rel="preconnect" href="https://fonts.googleapis.com" />
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet" />
+  <!-- PDF Libraries (pdf-lib & pdf.js) -->
+  <script src="https://cdn.jsdelivr.net/npm/pdf-lib@1.17.1/dist/pdf-lib.min.js"></script>
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.min.js"></script>
+  <style>
+    body {
+      font-family: 'Inter', -apple-system, BlinkMacSystemFont, sans-serif;
+    }
+    .checkerboard {
+      background-color: #f8fafc;
+      background-image:
+        linear-gradient(45deg, #e2e8f0 25%, transparent 25%),
+        linear-gradient(-45deg, #e2e8f0 25%, transparent 25%),
+        linear-gradient(45deg, transparent 75%, #e2e8f0 75%),
+        linear-gradient(-45deg, transparent 75%, #e2e8f0 75%);
+      background-size: 14px 14px;
+      background-position: 0 0, 0 7px, 7px -7px, -7px 0;
+    }
+    .sig-overlay {
+      touch-action: none;
+      user-select: none;
+    }
+    .sig-overlay:hover .sig-handle,
+    .sig-overlay.active .sig-handle {
+      opacity: 1;
+    }
+    .sig-handle {
+      opacity: 0.7;
+      transition: opacity 0.15s ease;
+    }
+  </style>
+</head>
+<body class="bg-slate-50 text-slate-900 min-h-screen flex flex-col">
+  <!-- Header -->
+  <header class="bg-white border-b border-slate-200 sticky top-0 z-30">
+    <div class="max-w-7xl mx-auto px-4 sm:px-6 h-16 flex items-center justify-between gap-3">
+      <div class="flex items-center gap-3 min-w-0">
+        <div class="w-9 h-9 rounded-xl bg-indigo-600 text-white flex items-center justify-center shrink-0 shadow-sm">
+          <svg class="w-5 h-5" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24">
+            <path stroke-linecap="round" stroke-linejoin="round" d="M16.862 4.487l1.687-1.688a1.875 1.875 0 112.652 2.652L10.582 16.07a4.5 4.5 0 01-1.897 1.13L6 18l.8-2.685a4.5 4.5 0 011.13-1.897l8.932-8.931zm0 0L19.5 7.125M18 14v4.75A2.25 2.25 0 0115.75 21H5.25A2.25 2.25 0 013 18.75V8.25A2.25 2.25 0 015.25 6H10" />
+          </svg>
+        </div>
+        <div class="min-w-0">
+          <h1 class="text-base sm:text-lg font-bold text-slate-900 truncate">AutoSign AI — Ký PDF Tự Động</h1>
+          <p class="text-xs text-slate-500 truncate hidden sm:block">Ký PDF tự động với Gemini Pro — Nhúng chữ ký sắc nét chuẩn vector</p>
+        </div>
+      </div>
+
+      <div class="flex items-center gap-2 shrink-0">
+        <button id="btnOpenGuide" type="button" class="px-3 py-1.5 text-xs sm:text-sm font-medium text-slate-600 hover:text-slate-900 hover:bg-slate-100 rounded-lg transition">
+          Cách hoạt động
+        </button>
+        <button id="btnExportPdf" type="button" disabled class="px-4 py-2 text-xs sm:text-sm font-semibold text-white bg-indigo-600 hover:bg-indigo-700 disabled:bg-slate-300 disabled:cursor-not-allowed rounded-lg shadow-sm transition flex items-center gap-1.5 cursor-pointer">
+          <svg class="w-4 h-4" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24">
+            <path stroke-linecap="round" stroke-linejoin="round" d="M3 16.5v2.25A2.25 2.25 0 005.25 21h13.5A2.25 2.25 0 0021 18.75V16.5M16.5 12L12 16.5m0 0L7.5 12m4.5 4.5V3" />
+          </svg>
+          <span>Xuất PDF đã ký</span>
+        </button>
+      </div>
+    </div>
+  </header>
+
+  <!-- Toast Banner -->
+  <div id="toastContainer" class="fixed bottom-4 right-4 z-50 flex flex-col gap-2 max-w-sm w-full pointer-events-none px-4 sm:px-0"></div>
+
+  <!-- Main Workspace -->
+  <main class="flex-1 max-w-7xl w-full mx-auto px-4 sm:px-6 py-5 grid grid-cols-1 lg:grid-cols-12 gap-5">
+    <!-- Left Sidebar: Controls -->
+    <aside class="lg:col-span-4 flex flex-col gap-4">
+      <!-- Step 1: Signature -->
+      <section class="bg-white rounded-2xl border border-slate-200 p-4 shadow-sm">
+        <div class="flex items-center justify-between mb-3">
+          <div class="flex items-center gap-2">
+            <span class="w-6 h-6 rounded-full bg-indigo-50 text-indigo-700 text-xs font-bold flex items-center justify-center">1</span>
+            <h2 class="text-sm font-semibold text-slate-900">Chữ ký hình ảnh</h2>
+          </div>
+          <button id="btnGenSampleSig" type="button" class="text-xs font-medium text-indigo-600 hover:text-indigo-800 hover:underline">
+            Tạo chữ ký mẫu
+          </button>
+        </div>
+
+        <div id="sigDropZone" class="checkerboard rounded-xl border-2 border-dashed border-slate-300 hover:border-indigo-400 p-4 flex flex-col items-center justify-center min-h-[120px] relative overflow-hidden transition cursor-pointer select-none">
+          <img id="sigPreviewImg" alt="Xem trước chữ ký" class="max-h-20 max-w-full object-contain hidden pointer-events-none" />
+          <div id="sigEmptyState" class="text-center pointer-events-none">
+            <p class="text-xs text-slate-500 mb-2">Chưa có chữ ký (PNG/JPG)</p>
+          </div>
+          <button id="btnBrowseSig" type="button" class="inline-flex items-center gap-1.5 px-3 py-1.5 bg-white border border-slate-300 hover:bg-slate-50 rounded-lg text-xs font-medium text-slate-700 shadow-xs cursor-pointer">
+            <svg class="w-3.5 h-3.5" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" d="M12 4.5v15m7.5-7.5h-15" /></svg>
+            <span>Tải ảnh chữ ký</span>
+          </button>
+        </div>
+
+        <!-- Visible native input below -->
+        <div class="mt-2.5 flex items-center gap-2">
+          <input id="sigFileInput" type="file" accept="image/png,image/jpeg,image/webp,image/gif" class="block w-full text-xs text-slate-500 file:mr-2 file:py-1 file:px-2.5 file:rounded-md file:border-0 file:text-[11px] file:font-semibold file:bg-slate-100 file:text-slate-700 hover:file:bg-slate-200 cursor-pointer" />
+        </div>
+
+        <div class="mt-3 flex flex-wrap items-center justify-between gap-2">
+          <label class="inline-flex items-center gap-2 text-xs text-slate-700 cursor-pointer select-none">
+            <input id="chkRemoveBg" type="checkbox" checked class="rounded border-slate-300 text-indigo-600 focus:ring-indigo-500" />
+            <span>Tự động xóa nền trắng</span>
+          </label>
+          <div class="flex items-center gap-2">
+            <button id="btnChangeSig" type="button" class="hidden text-xs font-medium text-slate-600 hover:text-slate-900">Đổi ảnh</button>
+            <button id="btnClearSig" type="button" class="hidden text-xs font-medium text-rose-600 hover:text-rose-800">Xóa</button>
+          </div>
+        </div>
+      </section>
+
+      <!-- Step 2: Upload Document (PDF only) -->
+      <section class="bg-white rounded-2xl border border-slate-200 p-4 shadow-sm">
+        <div class="flex items-center justify-between mb-3">
+          <div class="flex items-center gap-2">
+            <span class="w-6 h-6 rounded-full bg-indigo-50 text-indigo-700 text-xs font-bold flex items-center justify-center">2</span>
+            <h2 class="text-sm font-semibold text-slate-900">Tài liệu PDF cần ký</h2>
+          </div>
+          <button id="btnSamplePdf" type="button" class="text-xs font-medium text-indigo-600 hover:text-indigo-800 hover:underline">PDF mẫu</button>
+        </div>
+
+        <div id="docDropZone" class="rounded-xl border-2 border-dashed border-slate-300 hover:border-indigo-400 hover:bg-indigo-50/30 transition p-5 text-center cursor-pointer select-none">
+          <div class="pointer-events-none">
+            <svg class="w-7 h-7 mx-auto text-slate-400 mb-1.5" fill="none" stroke="currentColor" stroke-width="1.5" viewBox="0 0 24 24">
+              <path stroke-linecap="round" stroke-linejoin="round" d="M19.5 14.25v-2.625a3.375 3.375 0 00-3.375h-1.5A1.125 1.125 0 0113.5 7.125v-1.5a3.375 3.375 0 00-3.375-3.375H8.25m6.75 12l-3-3m0 0l-3 3m3-3v6m-1.5-15H5.625c-.621 0-1.125.504-1.125 1.125v17.25c0 .621.504 1.125 1.125 1.125h12.75c.621 0 1.125-.504 1.125-1.125V11.25a9 9 0 00-9-9z" />
+            </svg>
+            <p class="text-xs font-semibold text-slate-700 mb-1" id="docFileNameLabel">Kéo thả tài liệu PDF vào đây</p>
+            <p class="text-[11px] text-slate-400 mb-3">Hỗ trợ tệp định dạng PDF (.pdf)</p>
+          </div>
+          <button id="btnBrowseDoc" type="button" class="inline-flex items-center gap-1.5 px-3.5 py-1.5 rounded-lg bg-indigo-600 hover:bg-indigo-700 text-white text-xs font-semibold shadow-xs cursor-pointer">
+            <svg class="w-3.5 h-3.5" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" d="M12 4.5v15m7.5-7.5h-15" /></svg>
+            <span>Chọn file PDF từ máy tính</span>
+          </button>
+        </div>
+
+        <!-- Visible native input below -->
+        <div class="mt-2.5 flex items-center gap-2">
+          <input id="docFileInput" type="file" accept=".pdf" class="block w-full text-xs text-slate-500 file:mr-2 file:py-1 file:px-2.5 file:rounded-md file:border-0 file:text-[11px] file:font-semibold file:bg-slate-100 file:text-slate-700 hover:file:bg-slate-200 cursor-pointer" />
+        </div>
+      </section>
+
+      <!-- Step 3: Gemini Pro AI -->
+      <section class="bg-white rounded-2xl border border-slate-200 p-4 shadow-sm">
+        <div class="flex items-center justify-between mb-3">
+          <div class="flex items-center gap-2">
+            <span class="w-6 h-6 rounded-full bg-indigo-50 text-indigo-700 text-xs font-bold flex items-center justify-center">3</span>
+            <h2 class="text-sm font-semibold text-slate-900">Gemini Pro định vị chữ ký</h2>
+          </div>
+          <span id="aiBadge" class="text-[11px] font-medium px-2 py-0.5 rounded-full bg-slate-100 text-slate-600">Sẵn sàng</span>
+        </div>
+
+        <div class="space-y-2.5">
+          <div>
+            <label for="geminiModelSelect" class="block text-xs font-medium text-slate-700 mb-1">Mô hình AI</label>
+            <select id="geminiModelSelect" class="w-full text-xs rounded-lg border border-slate-300 px-2.5 py-2 bg-white focus:outline-none focus:ring-2 focus:ring-indigo-500">
+              <option value="gemini-3.1-flash-lite" selected>Gemini 3.1 Flash Lite (Khuyên dùng - Ổn định, không nghẽn tải)</option>
+              <option value="gemini-3.5-flash-lite">Gemini 3.5 Flash Lite</option>
+              <option value="gemini-3.1-flash-lite-preview">Gemini 3.1 Flash Lite Preview</option>
+              <option value="gemini-3.8-flash">Gemini 3.8 Flash (Có thể nghẽn giờ cao điểm)</option>
+            </select>
+          </div>
+
+          <!-- Ẩn phần nhập Gemini API Key (Đã gán API Key mặc định) -->
+          <div class="hidden">
+            <input id="geminiApiKey" type="password" value="" />
+          </div>
+
+          <div>
+            <label for="aiInstruction" class="block text-xs font-medium text-slate-700 mb-1">Yêu cầu cho AI</label>
+            <input id="aiInstruction" type="text" value="Tìm vị trí ô 'Người lập biểu' hoặc 'Người ký / Giám đốc' ở cuối trang và đặt chữ ký cân đối." class="w-full text-xs rounded-lg border border-slate-300 px-2.5 py-2 focus:outline-none focus:ring-2 focus:ring-indigo-500" />
+          </div>
+
+          <div class="grid grid-cols-1 sm:grid-cols-2 gap-2 pt-1">
+            <button id="btnAnalyzeAi" type="button" disabled class="w-full py-2 px-3 rounded-lg bg-slate-900 hover:bg-slate-800 disabled:bg-slate-300 disabled:cursor-not-allowed text-white text-xs font-semibold transition flex items-center justify-center gap-1.5 cursor-pointer">
+              <span>AI Tìm Vị Trí</span>
+            </button>
+            <button id="btnAutoSignExport" type="button" disabled class="w-full py-2 px-3 rounded-lg bg-indigo-600 hover:bg-indigo-700 disabled:bg-slate-300 disabled:cursor-not-allowed text-white text-xs font-semibold transition flex items-center justify-center gap-1.5 cursor-pointer">
+              <span>Tự động ký &amp; Xuất</span>
+            </button>
+          </div>
+
+          <div id="aiResultBox" class="hidden rounded-xl bg-indigo-50 border border-indigo-100 p-2.5 text-xs text-indigo-900"></div>
+        </div>
+      </section>
+
+      <!-- Step 4: Fine-tune Signature -->
+      <section id="sigControlsCard" class="bg-white rounded-2xl border border-slate-200 p-4 shadow-sm">
+        <div class="flex items-center justify-between mb-3">
+          <h2 class="text-sm font-semibold text-slate-900">Tinh chỉnh vị trí</h2>
+          <button id="btnCenterBottom" type="button" class="text-xs font-medium text-indigo-600 hover:underline">Đặt góc phải cuối</button>
+        </div>
+        <div class="space-y-3">
+          <div>
+            <div class="flex justify-between text-xs text-slate-600 mb-1">
+              <span>Kích thước chữ ký</span>
+              <span id="sigWidthLabel" class="font-medium text-slate-900">22%</span>
+            </div>
+            <input id="sigWidthSlider" type="range" min="8" max="50" value="22" class="w-full accent-indigo-600" />
+          </div>
+          <div class="grid grid-cols-2 gap-2 text-xs text-slate-600">
+            <div class="bg-slate-50 rounded-lg p-2 border border-slate-200">
+              <span class="block text-[11px] text-slate-400">Tọa độ ngang (X)</span>
+              <span id="coordXLabel" class="font-semibold text-slate-800">65%</span>
+            </div>
+            <div class="bg-slate-50 rounded-lg p-2 border border-slate-200">
+              <span class="block text-[11px] text-slate-400">Tọa độ dọc (Y)</span>
+              <span id="coordYLabel" class="font-semibold text-slate-800">75%</span>
+            </div>
+          </div>
+          <p class="text-[11px] text-slate-500">Mẹo: Bạn có thể kéo trực tiếp chữ ký trên bản xem trước để căn chỉnh lại bất cứ lúc nào.</p>
+        </div>
+      </section>
+    </aside>
+
+    <!-- Right Area: Interactive Preview -->
+    <section class="lg:col-span-8 flex flex-col gap-3">
+      <!-- Toolbar -->
+      <div class="bg-white rounded-2xl border border-slate-200 px-4 py-2.5 shadow-sm flex flex-wrap items-center justify-between gap-2">
+        <div class="flex items-center gap-2 text-xs text-slate-600">
+          <span id="docTypeBadge" class="px-2 py-0.5 rounded-md bg-slate-100 font-semibold text-slate-700">Chưa có tệp</span>
+          <span id="pageInfoLabel" class="text-slate-500">Tải tệp PDF ở cột bên trái</span>
+        </div>
+
+        <!-- Multi-page controls -->
+        <div id="navControls" class="hidden items-center gap-2">
+          <div id="pdfPageNav" class="flex items-center gap-1.5">
+            <button id="btnPrevPage" type="button" class="px-2.5 py-1 rounded-lg border border-slate-200 hover:bg-slate-50 text-xs font-medium cursor-pointer">Trước</button>
+            <span id="pdfPageIndicator" class="text-xs font-medium text-slate-700 px-1">1 / 1</span>
+            <button id="btnNextPage" type="button" class="px-2.5 py-1 rounded-lg border border-slate-200 hover:bg-slate-50 text-xs font-medium cursor-pointer">Sau</button>
+          </div>
+        </div>
+      </div>
+
+      <!-- Canvas / Document Stage -->
+      <div class="bg-slate-200/70 rounded-2xl border border-slate-200 p-4 sm:p-6 min-h-[540px] flex items-start justify-center overflow-auto">
+        <div id="emptyStage" class="my-auto text-center max-w-md py-12">
+          <div class="w-14 h-14 mx-auto rounded-2xl bg-white shadow-sm border border-slate-200 flex items-center justify-center text-indigo-600 mb-3">
+            <svg class="w-7 h-7" fill="none" stroke="currentColor" stroke-width="1.5" viewBox="0 0 24 24">
+              <path stroke-linecap="round" stroke-linejoin="round" d="M19.5 14.25v-2.625a3.375 3.375 0 00-3.375h-1.5A1.125 1.125 0 0113.5 7.125v-1.5a3.375 3.375 0 00-3.375-3.375H8.25m6.75 12l-3-3m0 0l-3 3m3-3v6m-1.5-15H5.625c-.621 0-1.125.504-1.125 1.125v17.25c0 .621.504 1.125 1.125 1.125h12.75c.621 0 1.125-.504 1.125-1.125V11.25a9 9 0 00-9-9z" />
+            </svg>
+          </div>
+          <h3 class="text-sm font-semibold text-slate-800 mb-1">Ký trực tiếp lên tệp PDF</h3>
+          <p class="text-xs text-slate-500 leading-relaxed mb-4">
+            Tải lên chữ ký và tệp PDF của bạn, hoặc bấm nút bên dưới để chạy thử ngay với tài liệu PDF mẫu.
+          </p>
+          <div class="flex flex-wrap items-center justify-center gap-2">
+            <button id="btnQuickDemoPdf" type="button" class="px-3.5 py-2 rounded-xl bg-indigo-600 hover:bg-indigo-700 text-white text-xs font-semibold shadow-sm transition cursor-pointer">
+              Dùng thử PDF mẫu
+            </button>
+          </div>
+        </div>
+
+        <!-- Document Paper Stage -->
+        <div id="documentStage" class="hidden relative bg-white shadow-lg border border-slate-300 select-none overflow-hidden" style="width: 100%; max-width: 720px;">
+          <!-- PDF Canvas -->
+          <canvas id="pdfRenderCanvas" class="w-full h-auto block"></canvas>
+
+          <!-- Draggable Signature Overlay -->
+          <div id="sigOverlay" class="sig-overlay hidden absolute cursor-move border-2 border-dashed border-indigo-500/80 bg-indigo-500/5 rounded-md p-0.5" style="left: 65%; top: 75%; width: 22%;">
+            <img id="sigOverlayImg" alt="Chữ ký trên tài liệu" class="w-full h-auto block pointer-events-none" />
+            <span class="sig-handle absolute -top-2.5 -right-2.5 w-5 h-5 rounded-full bg-indigo-600 text-white text-[10px] font-bold flex items-center justify-center shadow">
+              AI
+            </span>
+          </div>
+        </div>
+      </div>
+    </section>
+  </main>
+
+  <!-- How it works modal -->
+  <div id="guideModal" class="fixed inset-0 z-50 hidden bg-slate-900/50 backdrop-blur-xs items-center justify-center p-4">
+    <div class="bg-white rounded-2xl max-w-lg w-full p-5 shadow-xl border border-slate-200">
+      <div class="flex items-center justify-between mb-3">
+        <h3 class="text-base font-bold text-slate-900">Quy trình ký PDF hoạt động thế nào?</h3>
+        <button id="btnCloseGuide" type="button" class="text-slate-400 hover:text-slate-700 text-lg font-bold px-2 cursor-pointer">&times;</button>
+      </div>
+      <div class="space-y-3 text-xs text-slate-600 leading-relaxed">
+        <p><strong class="text-slate-900">1. Xử lý ảnh chữ ký:</strong> Bạn chỉ cần tải ảnh chữ ký lên (bật "Tự động xóa nền trắng" để biến ảnh chụp chữ ký trên giấy thành chữ ký nền trong suốt).</p>
+        <p><strong class="text-slate-900">2. Xem trước PDF trực quan:</strong> Khi tải tệp PDF lên, hệ thống hiển thị trực quan từng trang PDF chuẩn xác. Bạn có thể lật trang, kéo thả chữ ký đến bất kỳ vị trí nào.</p>
+        <p><strong class="text-slate-900">3. AI Gemini tự động tìm vị trí ký:</strong> Bấm <em>AI Tìm Vị Trí</em> để Gemini Pro tự động quét tài liệu và đặt chữ ký chính xác vào ô <em>Người ký / Giám đốc / Đại diện</em>.</p>
+        <p><strong class="text-slate-900">4. Xuất file PDF chuẩn Vector:</strong> Nhúng ảnh chữ ký trực tiếp vào file PDF gốc bằng công cụ PDF-Lib, giữ nguyên 100% độ sắc nét của văn bản và kích thước tệp gọn nhẹ.</p>
+      </div>
+      <div class="mt-4 flex justify-end">
+        <button id="btnCloseGuideBottom" type="button" class="px-4 py-2 bg-indigo-600 hover:bg-indigo-700 text-white text-xs font-semibold rounded-lg cursor-pointer">Đã hiểu</button>
+      </div>
+    </div>
+  </div>
+
+  <script>
+    (function () {
+      'use strict';
+
+      if (window.pdfjsLib) {
+        window.pdfjsLib.GlobalWorkerOptions.workerSrc =
+          'https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.worker.min.js';
+      }
+
+      const DEFAULT_GEMINI_KEY = atob('QVEuQWI4Uk42STM3d1NxMTlrUFVmVDhNS1IwdEtpdWVXUGNoYk9uM2d6Q2kwWXBFM0tEd3c=');
+
+      const state = {
+        rawSigDataUrl: null,
+        processedSigDataUrl: null,
+        docType: null, // 'pdf'
+        docName: 'tai-lieu',
+        pdfBytes: null,
+        pdfDocProxy: null,
+        pdfPageCount: 0,
+        currentPage: 1,
+        pdfPageTextItems: [],
+        sigBox: {
+          xPercent: 64,
+          yPercent: 74,
+          widthPercent: 22
+        },
+        isDragging: false,
+        dragOffsetX: 0,
+        dragOffsetY: 0
+      };
+
+      const el = {
+        sigDropZone: document.getElementById('sigDropZone'),
+        sigPreviewImg: document.getElementById('sigPreviewImg'),
+        sigEmptyState: document.getElementById('sigEmptyState'),
+        sigFileInput: document.getElementById('sigFileInput'),
+        btnBrowseSig: document.getElementById('btnBrowseSig'),
+        chkRemoveBg: document.getElementById('chkRemoveBg'),
+        btnChangeSig: document.getElementById('btnChangeSig'),
+        btnClearSig: document.getElementById('btnClearSig'),
+        btnGenSampleSig: document.getElementById('btnGenSampleSig'),
+        docDropZone: document.getElementById('docDropZone'),
+        docFileInput: document.getElementById('docFileInput'),
+        btnBrowseDoc: document.getElementById('btnBrowseDoc'),
+        docFileNameLabel: document.getElementById('docFileNameLabel'),
+        btnSamplePdf: document.getElementById('btnSamplePdf'),
+        btnQuickDemoPdf: document.getElementById('btnQuickDemoPdf'),
+        geminiModelSelect: document.getElementById('geminiModelSelect'),
+        geminiApiKey: document.getElementById('geminiApiKey'),
+        aiInstruction: document.getElementById('aiInstruction'),
+        btnAnalyzeAi: document.getElementById('btnAnalyzeAi'),
+        btnAutoSignExport: document.getElementById('btnAutoSignExport'),
+        btnExportPdf: document.getElementById('btnExportPdf'),
+        aiBadge: document.getElementById('aiBadge'),
+        aiResultBox: document.getElementById('aiResultBox'),
+        sigWidthSlider: document.getElementById('sigWidthSlider'),
+        sigWidthLabel: document.getElementById('sigWidthLabel'),
+        coordXLabel: document.getElementById('coordXLabel'),
+        coordYLabel: document.getElementById('coordYLabel'),
+        btnCenterBottom: document.getElementById('btnCenterBottom'),
+        docTypeBadge: document.getElementById('docTypeBadge'),
+        pageInfoLabel: document.getElementById('pageInfoLabel'),
+        navControls: document.getElementById('navControls'),
+        pdfPageNav: document.getElementById('pdfPageNav'),
+        btnPrevPage: document.getElementById('btnPrevPage'),
+        btnNextPage: document.getElementById('btnNextPage'),
+        pdfPageIndicator: document.getElementById('pdfPageIndicator'),
+        emptyStage: document.getElementById('emptyStage'),
+        documentStage: document.getElementById('documentStage'),
+        pdfRenderCanvas: document.getElementById('pdfRenderCanvas'),
+        sigOverlay: document.getElementById('sigOverlay'),
+        sigOverlayImg: document.getElementById('sigOverlayImg'),
+        toastContainer: document.getElementById('toastContainer'),
+        guideModal: document.getElementById('guideModal'),
+        btnOpenGuide: document.getElementById('btnOpenGuide'),
+        btnCloseGuide: document.getElementById('btnCloseGuide'),
+        btnCloseGuideBottom: document.getElementById('btnCloseGuideBottom')
+      };
+
+      function showToast(message, type) {
+        const colors = {
+          success: 'bg-emerald-600 text-white',
+          error: 'bg-rose-600 text-white',
+          info: 'bg-slate-900 text-white'
+        };
+        const toast = document.createElement('div');
+        toast.className = 'pointer-events-auto rounded-xl px-3.5 py-2.5 text-xs font-medium shadow-lg transition-all ' + (colors[type] || colors.info);
+        toast.textContent = message;
+        el.toastContainer.appendChild(toast);
+        setTimeout(() => {
+          toast.style.opacity = '0';
+          setTimeout(() => toast.remove(), 250);
+        }, 3400);
+      }
+
+      function savePrefs() {
+        try {
+          if (state.rawSigDataUrl) {
+            localStorage.setItem('autosign_sig_raw', state.rawSigDataUrl);
+          } else {
+            localStorage.removeItem('autosign_sig_raw');
+          }
+          localStorage.setItem('autosign_gemini_key', DEFAULT_GEMINI_KEY);
+        } catch (err) {
+          // Ignore storage restrictions
+        }
+      }
+
+      function loadPrefs() {
+        try {
+          if (el.geminiApiKey) {
+            el.geminiApiKey.value = DEFAULT_GEMINI_KEY;
+          }
+          const savedSig = localStorage.getItem('autosign_sig_raw');
+          if (savedSig) {
+            state.rawSigDataUrl = savedSig;
+            processSignatureImage();
+          }
+        } catch (err) {
+          // Ignore storage restrictions
+        }
+      }
+
+      function processSignatureImage() {
+        if (!state.rawSigDataUrl) {
+          state.processedSigDataUrl = null;
+          renderSignatureUI();
+          return;
+        }
+        if (!el.chkRemoveBg.checked) {
+          state.processedSigDataUrl = state.rawSigDataUrl;
+          renderSignatureUI();
+          return;
+        }
+        const img = new Image();
+        img.onload = function () {
+          const canvas = document.createElement('canvas');
+          canvas.width = img.width;
+          canvas.height = img.height;
+          const ctx = canvas.getContext('2d');
+          ctx.drawImage(img, 0, 0);
+          const imgData = ctx.getImageData(0, 0, canvas.width, canvas.height);
+          const data = imgData.data;
+          for (let i = 0; i < data.length; i += 4) {
+            const r = data[i];
+            const g = data[i + 1];
+            const b = data[i + 2];
+            if (r > 225 && g > 225 && b > 225) {
+              data[i + 3] = 0;
+            }
+          }
+          ctx.putImageData(imgData, 0, 0);
+          state.processedSigDataUrl = canvas.toDataURL('image/png');
+          renderSignatureUI();
+        };
+        img.src = state.rawSigDataUrl;
+      }
+
+      function renderSignatureUI() {
+        if (state.processedSigDataUrl) {
+          el.sigPreviewImg.src = state.processedSigDataUrl;
+          el.sigPreviewImg.classList.remove('hidden');
+          el.sigEmptyState.classList.add('hidden');
+          el.btnChangeSig.classList.remove('hidden');
+          el.btnClearSig.classList.remove('hidden');
+          el.sigOverlayImg.src = state.processedSigDataUrl;
+        } else {
+          el.sigPreviewImg.classList.add('hidden');
+          el.sigEmptyState.classList.remove('hidden');
+          el.btnChangeSig.classList.add('hidden');
+          el.btnClearSig.classList.add('hidden');
+        }
+        updateButtonsAndOverlay();
+      }
+
+      function updateButtonsAndOverlay() {
+        const hasDoc = Boolean(state.docType === 'pdf');
+        const hasSig = Boolean(state.processedSigDataUrl);
+
+        el.btnAnalyzeAi.disabled = !hasDoc;
+        el.btnAutoSignExport.disabled = !(hasDoc && hasSig);
+        el.btnExportPdf.disabled = !(hasDoc && hasSig);
+
+        if (hasDoc && hasSig) {
+          el.sigOverlay.classList.remove('hidden');
+        } else {
+          el.sigOverlay.classList.add('hidden');
+        }
+
+        el.sigOverlay.style.left = state.sigBox.xPercent + '%';
+        el.sigOverlay.style.top = state.sigBox.yPercent + '%';
+        el.sigOverlay.style.width = state.sigBox.widthPercent + '%';
+        el.sigWidthSlider.value = Math.round(state.sigBox.widthPercent);
+        el.sigWidthLabel.textContent = Math.round(state.sigBox.widthPercent) + '%';
+        el.coordXLabel.textContent = Math.round(state.sigBox.xPercent) + '%';
+        el.coordYLabel.textContent = Math.round(state.sigBox.yPercent) + '%';
+      }
+
+      function generateSampleSignature() {
+        const canvas = document.createElement('canvas');
+        canvas.width = 480;
+        canvas.height = 180;
+        const ctx = canvas.getContext('2d');
+        ctx.fillStyle = '#ffffff';
+        ctx.fillRect(0, 0, canvas.width, canvas.height);
+
+        ctx.strokeStyle = '#1e3a8a';
+        ctx.lineWidth = 4.5;
+        ctx.lineCap = 'round';
+        ctx.lineJoin = 'round';
+
+        ctx.beginPath();
+        ctx.moveTo(48, 122);
+        ctx.bezierCurveTo(60, 42, 105, 34, 96, 118);
+        ctx.bezierCurveTo(92, 145, 130, 82, 152, 74);
+        ctx.bezierCurveTo(168, 68, 160, 120, 182, 106);
+        ctx.bezierCurveTo(205, 92, 224, 52, 236, 48);
+        ctx.bezierCurveTo(244, 46, 220, 136, 255, 112);
+        ctx.bezierCurveTo(286, 90, 310, 72, 336, 92);
+        ctx.bezierCurveTo(354, 106, 376, 86, 412, 80);
+        ctx.stroke();
+
+        ctx.lineWidth = 2.8;
+        ctx.beginPath();
+        ctx.moveTo(64, 142);
+        ctx.quadraticCurveTo(240, 126, 420, 134);
+        ctx.stroke();
+
+        state.rawSigDataUrl = canvas.toDataURL('image/png');
+        savePrefs();
+        processSignatureImage();
+        showToast('Đã tạo chữ ký mẫu thành công.', 'success');
+      }
+
+      async function createSamplePdfBytes() {
+        const { PDFDocument, StandardFonts, rgb } = window.PDFLib;
+        const pdfDoc = await PDFDocument.create();
+        const page = pdfDoc.addPage([595.28, 841.89]); // A4
+        const font = await pdfDoc.embedFont(StandardFonts.Helvetica);
+        const fontBold = await pdfDoc.embedFont(StandardFonts.HelveticaBold);
+
+        page.drawText('BIEN BAN XAC NHAN GIAO NHAN HANG HOA', {
+          x: 95,
+          y: 770,
+          size: 16,
+          font: fontBold,
+          color: rgb(0.06, 0.09, 0.16)
+        });
+        page.drawText('So: 2026/BBGN-01  |  Ngay: 17/11/2026', {
+          x: 180,
+          y: 745,
+          size: 10,
+          font: font,
+          color: rgb(0.35, 0.4, 0.48)
+        });
+
+        const lines = [
+          'Ben giao: Cong ty TNHH Ky Thuat Minh Phat',
+          'Ben nhan: Phong Hanh Chinh - Tong Hop',
+          'Dia diem: TP. Thu Duc, TP. Ho Chi Minh',
+          '',
+          'Noi dung ban giao:',
+          '1. Thiet bi van phong & phu kien theo don hang #DH-8842 (So luong: 05 bo)',
+          '2. Tai lieu huong dan su dung va phieu bao hanh chinh hang 12 thang',
+          '3. Hoa don gia tri gia tang dien tu da xac nhan',
+          '',
+          'Hai ben da kiem tra day du so luong, chung loai va dong y xac nhan.'
+        ];
+
+        let y = 690;
+        for (const line of lines) {
+          page.drawText(line, { x: 56, y, size: 11, font, color: rgb(0.15, 0.2, 0.28) });
+          y -= 24;
+        }
+
+        page.drawRectangle({
+          x: 56,
+          y: 130,
+          width: 210,
+          height: 110,
+          borderColor: rgb(0.8, 0.84, 0.88),
+          borderWidth: 1
+        });
+        page.drawText('DAI DIEN BEN GIAO', { x: 105, y: 220, size: 10, font: fontBold, color: rgb(0.15, 0.2, 0.28) });
+        page.drawText('(Ky va ghi ro ho ten)', { x: 108, y: 205, size: 9, font, color: rgb(0.45, 0.5, 0.58) });
+
+        page.drawRectangle({
+          x: 330,
+          y: 130,
+          width: 210,
+          height: 110,
+          borderColor: rgb(0.8, 0.84, 0.88),
+          borderWidth: 1
+        });
+        page.drawText('NGUOI KY / GIAM DOC', { x: 375, y: 220, size: 10, font: fontBold, color: rgb(0.15, 0.2, 0.28) });
+        page.drawText('(Ky va ghi ro ho ten)', { x: 382, y: 205, size: 9, font, color: rgb(0.45, 0.5, 0.58) });
+
+        return await pdfDoc.save();
+      }
+
+      async function loadPdfBuffer(arrayBuffer, fileName) {
+        state.docType = 'pdf';
+        state.docName = fileName.replace(/\.pdf$/i, '');
+        state.pdfBytes = new Uint8Array(arrayBuffer);
+
+        const loadingTask = window.pdfjsLib.getDocument({ data: state.pdfBytes.slice() });
+        state.pdfDocProxy = await loadingTask.promise;
+        state.pdfPageCount = state.pdfDocProxy.numPages;
+        state.currentPage = 1;
+
+        el.docFileNameLabel.textContent = fileName;
+        el.docTypeBadge.textContent = 'PDF (' + state.pdfPageCount + ' TRANG)';
+        el.docTypeBadge.className = 'px-2 py-0.5 rounded-md bg-rose-50 font-semibold text-rose-700';
+        el.navControls.classList.remove('hidden');
+        el.navControls.classList.add('flex');
+        el.pdfPageNav.classList.remove('hidden');
+        el.pdfPageNav.classList.add('flex');
+
+        el.emptyStage.classList.add('hidden');
+        el.documentStage.classList.remove('hidden');
+
+        await renderCurrentPdfPage();
+
+        // Tự động tìm vị trí chữ ký
+        setTimeout(() => {
+          const detected = detectKeywordLocally();
+          state.sigBox.xPercent = detected.xPercent;
+          state.sigBox.yPercent = detected.yPercent;
+          state.sigBox.widthPercent = detected.widthPercent;
+          updateButtonsAndOverlay();
+        }, 80);
+
+        updateButtonsAndOverlay();
+      }
+
+      async function renderCurrentPdfPage() {
+        const page = await state.pdfDocProxy.getPage(state.currentPage);
+        const viewport = page.getViewport({ scale: 1.6 });
+        const canvas = el.pdfRenderCanvas;
+        const ctx = canvas.getContext('2d');
+        canvas.width = viewport.width;
+        canvas.height = viewport.height;
+
+        await page.render({ canvasContext: ctx, viewport }).promise;
+
+        const textContent = await page.getTextContent();
+        state.pdfPageTextItems = textContent.items.map((item) => {
+          const tx = item.transform;
+          const x = tx[4];
+          const yFromBottom = tx[5];
+          const pageHeightPt = page.view[3];
+          const pageWidthPt = page.view[2];
+          return {
+            str: item.str,
+            xPercent: (x / pageWidthPt) * 100,
+            yPercent: ((pageHeightPt - yFromBottom) / pageHeightPt) * 100
+          };
+        });
+
+        el.pdfPageIndicator.textContent = state.currentPage + ' / ' + state.pdfPageCount;
+        el.pageInfoLabel.textContent = 'Trang ' + state.currentPage + ' trên ' + state.pdfPageCount;
+      }
+
+      function captureStageImageBase64() {
+        const dataUrl = el.pdfRenderCanvas.toDataURL('image/jpeg', 0.85);
+        return dataUrl.split(',')[1];
+      }
+
+      function detectKeywordLocally() {
+        const keywords = ['giám đốc', 'giam doc', 'người ký', 'nguoi ky', 'ký tên', 'ky ten', 'xác nhận', 'xac nhan', 'signature', 'người lập', 'đại diện', 'director'];
+        if (state.docType === 'pdf' && state.pdfPageTextItems.length > 0) {
+          let best = null;
+          for (const item of state.pdfPageTextItems) {
+            const lower = item.str.toLowerCase();
+            if (keywords.some((kw) => lower.includes(kw))) {
+              best = item;
+            }
+          }
+          if (best) {
+            return {
+              xPercent: Math.min(Math.max(best.xPercent, 10), 72),
+              yPercent: Math.min(Math.max(best.yPercent + 4, 15), 82),
+              widthPercent: 22,
+              reason: 'Phát hiện từ khóa "' + best.str.trim() + '" ở vị trí chữ ký trên PDF.'
+            };
+          }
+        }
+        return {
+          xPercent: 60,
+          yPercent: 72,
+          widthPercent: 22,
+          reason: 'Đặt chữ ký tại vùng góc phải cuối trang (mặc định chuẩn văn bản).'
+        };
+      }
+
+      async function analyzeWithGeminiOrLocal() {
+        if (!state.docType) return;
+        const apiKey = (el.geminiApiKey ? el.geminiApiKey.value.trim() : '') || DEFAULT_GEMINI_KEY;
+        const selectedModel = el.geminiModelSelect.value;
+        const instruction = el.aiInstruction.value.trim() || 'Tìm vị trí đặt chữ ký phù hợp nhất.';
+
+        el.aiBadge.textContent = 'Đang phân tích...';
+        el.aiBadge.className = 'text-[11px] font-medium px-2 py-0.5 rounded-full bg-indigo-100 text-indigo-700';
+        el.btnAnalyzeAi.disabled = true;
+
+        try {
+          if (apiKey) {
+            savePrefs();
+            const imgBase64 = captureStageImageBase64();
+            const prompt =
+              'Bạn là trợ lý tự động đặt chữ ký lên tài liệu PDF. Hãy quan sát ảnh trang tài liệu này và yêu cầu: "' +
+              instruction +
+              '". Trả về DUY NHẤT một JSON hợp lệ dạng: {"xPercent": number, "yPercent": number, "widthPercent": number, "reason": "giải thích ngắn tiếng Việt"} trong đó xPercent (0-80) là khoảng cách mép trái chữ ký theo % chiều rộng trang, yPercent (0-85) là khoảng cách mép trên chữ ký theo % chiều cao trang, widthPercent (12-30) là chiều rộng chữ ký.';
+
+            const candidateModels = [
+              selectedModel,
+              'gemini-3.1-flash-lite',
+              'gemini-3.1-flash-lite-preview',
+              'gemini-3.5-flash-lite'
+            ];
+            const modelsToTry = [...new Set(candidateModels)];
+
+            let parsed = null;
+            let usedModel = selectedModel;
+            let lastError = null;
+
+            for (const model of modelsToTry) {
+              try {
+                const endpoint =
+                  'https://generativelanguage.googleapis.com/v1beta/models/' +
+                  encodeURIComponent(model) +
+                  ':generateContent?key=' +
+                  encodeURIComponent(apiKey);
+
+                const res = await fetch(endpoint, {
+                  method: 'POST',
+                  headers: { 'Content-Type': 'application/json' },
+                  body: JSON.stringify({
+                    contents: [
+                      {
+                        parts: [
+                          { text: prompt },
+                          {
+                            inline_data: {
+                              mime_type: 'image/jpeg',
+                              data: imgBase64
+                            }
+                          }
+                        ]
+                      }
+                    ],
+                    generationConfig: {
+                      temperature: 0.1,
+                      responseMimeType: 'application/json'
+                    }
+                  })
+                });
+
+                if (!res.ok) {
+                  const errText = await res.text();
+                  lastError = new Error('Model ' + model + ' (' + res.status + '): ' + errText.slice(0, 100));
+                  console.warn('Model ' + model + ' returned ' + res.status + ', trying fallback...');
+                  continue;
+                }
+
+                const json = await res.json();
+                const rawText = json.candidates?.[0]?.content?.parts?.[0]?.text || '';
+                parsed = JSON.parse(rawText.replace(/```json|```/g, '').trim());
+                usedModel = model;
+                break;
+              } catch (err) {
+                lastError = err;
+                console.warn('Attempt with ' + model + ' failed:', err);
+              }
+            }
+
+            if (!parsed) {
+              throw lastError || new Error('Không thể kết nối đến máy chủ AI.');
+            }
+
+            state.sigBox.xPercent = Math.min(Math.max(Number(parsed.xPercent) || 64, 2), 82);
+            state.sigBox.yPercent = Math.min(Math.max(Number(parsed.yPercent) || 74, 2), 88);
+            state.sigBox.widthPercent = Math.min(Math.max(Number(parsed.widthPercent) || 22, 10), 45);
+
+            el.aiBadge.textContent = 'Gemini AI OK';
+            el.aiBadge.className = 'text-[11px] font-medium px-2 py-0.5 rounded-full bg-emerald-100 text-emerald-700';
+            const modelNotice = usedModel !== selectedModel ? ' (Tự động đổi sang ' + usedModel + ' do máy chủ bận)' : '';
+            el.aiResultBox.textContent = (parsed.reason || 'Gemini AI đã định vị xong chữ ký.') + modelNotice;
+            el.aiResultBox.classList.remove('hidden');
+            showToast('Gemini AI đã xác định xong vị trí ký!', 'success');
+          } else {
+            const localRes = detectKeywordLocally();
+            state.sigBox.xPercent = localRes.xPercent;
+            state.sigBox.yPercent = localRes.yPercent;
+            state.sigBox.widthPercent = localRes.widthPercent;
+
+            el.aiBadge.textContent = 'Quét nội bộ';
+            el.aiBadge.className = 'text-[11px] font-medium px-2 py-0.5 rounded-full bg-amber-100 text-amber-800';
+            el.aiResultBox.textContent = localRes.reason + ' (Đang dùng quét từ khóa nội bộ).';
+            el.aiResultBox.classList.remove('hidden');
+            showToast('Đã định vị chữ ký tự động.', 'info');
+          }
+        } catch (err) {
+          const fallback = detectKeywordLocally();
+          state.sigBox.xPercent = fallback.xPercent;
+          state.sigBox.yPercent = fallback.yPercent;
+          el.aiBadge.textContent = 'Dùng dự phòng';
+          el.aiBadge.className = 'text-[11px] font-medium px-2 py-0.5 rounded-full bg-rose-100 text-rose-700';
+          el.aiResultBox.textContent = 'Không gọi được Gemini API (' + err.message + '). Đã chuyển sang quét từ khóa nội bộ.';
+          el.aiResultBox.classList.remove('hidden');
+          showToast('Lỗi kết nối Gemini AI, đã dùng vị trí dự phòng.', 'error');
+        } finally {
+          el.btnAnalyzeAi.disabled = false;
+          updateButtonsAndOverlay();
+        }
+      }
+
+      async function exportSignedPdf() {
+        if (state.docType !== 'pdf' || !state.pdfBytes || !state.processedSigDataUrl) {
+          showToast('Vui lòng chọn cả chữ ký và tệp PDF trước.', 'error');
+          return;
+        }
+
+        el.btnExportPdf.disabled = true;
+        try {
+          const { PDFDocument } = window.PDFLib;
+          const pdfDoc = await PDFDocument.load(state.pdfBytes);
+          const sigPngBytes = await fetch(state.processedSigDataUrl).then((r) => r.arrayBuffer());
+          const sigImage = await pdfDoc.embedPng(sigPngBytes);
+
+          const pages = pdfDoc.getPages();
+          const targetPage = pages[state.currentPage - 1];
+          const { width: pageW, height: pageH } = targetPage.getSize();
+
+          const sigW = (state.sigBox.widthPercent / 100) * pageW;
+          const aspect = sigImage.height / sigImage.width;
+          const sigH = sigW * aspect;
+
+          const x = (state.sigBox.xPercent / 100) * pageW;
+          const yFromTop = (state.sigBox.yPercent / 100) * pageH;
+          const y = pageH - yFromTop - sigH;
+
+          targetPage.drawImage(sigImage, {
+            x,
+            y,
+            width: sigW,
+            height: sigH
+          });
+
+          const outBytes = await pdfDoc.save();
+          downloadBlob(new Blob([outBytes], { type: 'application/pdf' }), state.docName + '_da_ky.pdf');
+          showToast('Đã xuất file PDF đã ký thành công!', 'success');
+        } catch (err) {
+          showToast('Lỗi khi xuất PDF: ' + err.message, 'error');
+        } finally {
+          el.btnExportPdf.disabled = false;
+        }
+      }
+
+      function downloadBlob(blob, filename) {
+        const url = URL.createObjectURL(blob);
+        const a = document.createElement('a');
+        a.href = url;
+        a.download = filename;
+        document.body.appendChild(a);
+        a.click();
+        a.remove();
+        setTimeout(() => URL.revokeObjectURL(url), 1000);
+      }
+
+      // File Processing Helpers
+      function handleSigFile(file) {
+        if (!file) return;
+        if (!file.type.startsWith('image/')) {
+          showToast('Vui lòng chọn tệp hình ảnh (PNG, JPG, WebP).', 'error');
+          return;
+        }
+        const reader = new FileReader();
+        reader.onload = (ev) => {
+          state.rawSigDataUrl = ev.target.result;
+          savePrefs();
+          processSignatureImage();
+          showToast('Đã tải ảnh chữ ký thành công!', 'success');
+        };
+        reader.readAsDataURL(file);
+      }
+
+      async function handleDocFile(file) {
+        if (!file) return;
+        if (!/\.pdf$/i.test(file.name)) {
+          showToast('Chỉ hỗ trợ tệp định dạng PDF (.pdf)! Vui lòng chọn lại.', 'error');
+          return;
+        }
+        showToast('Đang tải tài liệu PDF: ' + file.name + '...', 'info');
+        try {
+          const buf = await file.arrayBuffer();
+          await loadPdfBuffer(buf, file.name);
+          showToast('Đã mở file PDF thành công!', 'success');
+        } catch (err) {
+          console.error(err);
+          showToast('Lỗi khi mở tài liệu PDF: ' + err.message, 'error');
+        }
+      }
+
+      // Event Listeners: Signature
+      if (el.btnBrowseSig) {
+        el.btnBrowseSig.addEventListener('click', (e) => {
+          e.preventDefault();
+          e.stopPropagation();
+          el.sigFileInput.click();
+        });
+      }
+
+      if (el.sigDropZone) {
+        el.sigDropZone.addEventListener('click', (e) => {
+          if (e.target !== el.btnBrowseSig && !e.target.closest('#btnBrowseSig')) {
+            el.sigFileInput.click();
+          }
+        });
+
+        el.sigDropZone.addEventListener('dragover', (e) => {
+          e.preventDefault();
+          el.sigDropZone.classList.add('border-indigo-500', 'bg-indigo-50/40');
+        });
+
+        el.sigDropZone.addEventListener('dragleave', (e) => {
+          e.preventDefault();
+          el.sigDropZone.classList.remove('border-indigo-500', 'bg-indigo-50/40');
+        });
+
+        el.sigDropZone.addEventListener('drop', (e) => {
+          e.preventDefault();
+          el.sigDropZone.classList.remove('border-indigo-500', 'bg-indigo-50/40');
+          const file = e.dataTransfer?.files?.[0];
+          if (file) handleSigFile(file);
+        });
+      }
+
+      el.sigFileInput.addEventListener('change', (e) => {
+        const file = e.target.files?.[0];
+        if (file) handleSigFile(file);
+        el.sigFileInput.value = '';
+      });
+
+      el.btnChangeSig.addEventListener('click', (e) => {
+        e.stopPropagation();
+        el.sigFileInput.click();
+      });
+
+      el.chkRemoveBg.addEventListener('change', processSignatureImage);
+
+      el.btnClearSig.addEventListener('click', (e) => {
+        e.stopPropagation();
+        state.rawSigDataUrl = null;
+        savePrefs();
+        processSignatureImage();
+        el.sigFileInput.value = '';
+        showToast('Đã xóa chữ ký.', 'info');
+      });
+
+      el.btnGenSampleSig.addEventListener('click', generateSampleSignature);
+
+      // Event Listeners: Document (PDF only)
+      if (el.btnBrowseDoc) {
+        el.btnBrowseDoc.addEventListener('click', (e) => {
+          e.preventDefault();
+          e.stopPropagation();
+          el.docFileInput.click();
+        });
+      }
+
+      if (el.docDropZone) {
+        el.docDropZone.addEventListener('click', (e) => {
+          if (e.target !== el.btnBrowseDoc && !e.target.closest('#btnBrowseDoc')) {
+            el.docFileInput.click();
+          }
+        });
+
+        el.docDropZone.addEventListener('dragover', (e) => {
+          e.preventDefault();
+          el.docDropZone.classList.add('border-indigo-500', 'bg-indigo-50/40');
+        });
+
+        el.docDropZone.addEventListener('dragleave', (e) => {
+          e.preventDefault();
+          el.docDropZone.classList.remove('border-indigo-500', 'bg-indigo-50/40');
+        });
+
+        el.docDropZone.addEventListener('drop', async (e) => {
+          e.preventDefault();
+          el.docDropZone.classList.remove('border-indigo-500', 'bg-indigo-50/40');
+          const file = e.dataTransfer?.files?.[0];
+          if (file) await handleDocFile(file);
+        });
+      }
+
+      el.docFileInput.addEventListener('change', async (e) => {
+        const file = e.target.files?.[0];
+        if (file) await handleDocFile(file);
+        el.docFileInput.value = '';
+      });
+
+      window.addEventListener('dragover', (e) => e.preventDefault(), false);
+      window.addEventListener('drop', (e) => e.preventDefault(), false);
+
+      async function runSamplePdf() {
+        if (!state.rawSigDataUrl) generateSampleSignature();
+        const bytes = await createSamplePdfBytes();
+        await loadPdfBuffer(bytes.buffer, 'Bien_Ban_Giao_Nhan_Mau.pdf');
+      }
+
+      el.btnSamplePdf.addEventListener('click', runSamplePdf);
+      el.btnQuickDemoPdf.addEventListener('click', runSamplePdf);
+
+      el.btnPrevPage.addEventListener('click', async () => {
+        if (state.currentPage > 1) {
+          state.currentPage--;
+          await renderCurrentPdfPage();
+        }
+      });
+
+      el.btnNextPage.addEventListener('click', async () => {
+        if (state.currentPage < state.pdfPageCount) {
+          state.currentPage++;
+          await renderCurrentPdfPage();
+        }
+      });
+
+      el.sigWidthSlider.addEventListener('input', (e) => {
+        state.sigBox.widthPercent = Number(e.target.value);
+        updateButtonsAndOverlay();
+      });
+
+      el.btnCenterBottom.addEventListener('click', () => {
+        state.sigBox.xPercent = 64;
+        state.sigBox.yPercent = 74;
+        updateButtonsAndOverlay();
+      });
+
+      el.btnAnalyzeAi.addEventListener('click', analyzeWithGeminiOrLocal);
+
+      el.btnAutoSignExport.addEventListener('click', async () => {
+        await analyzeWithGeminiOrLocal();
+        await exportSignedPdf();
+      });
+
+      el.btnExportPdf.addEventListener('click', exportSignedPdf);
+
+      // Dragging signature overlay
+      el.sigOverlay.addEventListener('pointerdown', (e) => {
+        e.preventDefault();
+        state.isDragging = true;
+        el.sigOverlay.classList.add('active');
+        const sigRect = el.sigOverlay.getBoundingClientRect();
+        state.dragOffsetX = e.clientX - sigRect.left;
+        state.dragOffsetY = e.clientY - sigRect.top;
+        el.sigOverlay.setPointerCapture(e.pointerId);
+      });
+
+      el.sigOverlay.addEventListener('pointermove', (e) => {
+        if (!state.isDragging) return;
+        const stageRect = el.documentStage.getBoundingClientRect();
+        const newLeftPx = e.clientX - stageRect.left - state.dragOffsetX;
+        const newTopPx = e.clientY - stageRect.top - state.dragOffsetY;
+        const xPct = (newLeftPx / stageRect.width) * 100;
+        const yPct = (newTopPx / stageRect.height) * 100;
+        state.sigBox.xPercent = Math.min(Math.max(xPct, 0), 100 - state.sigBox.widthPercent);
+        state.sigBox.yPercent = Math.min(Math.max(yPct, 0), 92);
+        updateButtonsAndOverlay();
+      });
+
+      el.sigOverlay.addEventListener('pointerup', (e) => {
+        if (!state.isDragging) return;
+        state.isDragging = false;
+        el.sigOverlay.classList.remove('active');
+        try {
+          el.sigOverlay.releasePointerCapture(e.pointerId);
+        } catch (err) {
+          // Ignore
+        }
+      });
+
+      // Modal
+      function toggleGuide(show) {
+        if (show) {
+          el.guideModal.classList.remove('hidden');
+          el.guideModal.classList.add('flex');
+        } else {
+          el.guideModal.classList.add('hidden');
+          el.guideModal.classList.remove('flex');
+        }
+      }
+
+      el.btnOpenGuide.addEventListener('click', () => toggleGuide(true));
+      el.btnCloseGuide.addEventListener('click', () => toggleGuide(false));
+      el.btnCloseGuideBottom.addEventListener('click', () => toggleGuide(false));
+      el.guideModal.addEventListener('click', (e) => {
+        if (e.target === el.guideModal) toggleGuide(false);
+      });
+
+      loadPrefs();
+      updateButtonsAndOverlay();
+    })();
+  </script>
+</body>
+</html>
